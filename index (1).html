@@ -1,0 +1,707 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="color-scheme" content="dark light">
+  <title>Quiz Bowl Reader</title>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg-dark: #000;
+      --bg-light: #fff;
+      --fg-dark: #fff;
+      --fg-light: #000;
+      --card-opacity: 0.85;
+      --border-width: 4px;
+      --radius: 1rem;
+      --spacing: 1rem;
+      --transition: all 0.3s ease;
+      --base-wpm: 200;
+    }
+    body {
+      margin: 0;
+      padding: var(--spacing);
+      background: var(--bg-dark) no-repeat center/cover;
+      color: var(--fg-dark);
+      font-family: 'Orbitron', sans-serif;
+      transition: var(--transition);
+    }
+    body.light-mode {
+      background: var(--bg-light) no-repeat center/cover;
+      color: var(--fg-light);
+    }
+    .container {
+      max-width: 800px;
+      margin: auto;
+      padding: 0 1rem;
+    }
+    #scoreDisplay {
+      text-align: center;
+      font-size: 1.5rem;
+      margin-bottom: var(--spacing);
+    }
+    .file-upload {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-bottom: var(--spacing);
+      position: relative;
+    }
+    .card {
+      background: rgba(0,0,0,var(--card-opacity));
+      border: var(--border-width) solid currentColor;
+      border-radius: var(--radius);
+      padding: var(--spacing);
+      margin-bottom: var(--spacing);
+      transition: var(--transition);
+    }
+    body.light-mode .card {
+      background: rgba(255,255,255,var(--card-opacity));
+      border-color: var(--fg-light);
+    }
+    .filters {
+      display: grid;
+      grid-template-columns: repeat(auto-fit,minmax(200px,1fr));
+      gap: var(--spacing);
+      margin-bottom: var(--spacing);
+    }
+    details {
+      background: inherit;
+      border: var(--border-width) solid currentColor;
+      border-radius: var(--radius);
+      overflow: hidden;
+      transition: var(--transition);
+    }
+    details summary {
+      padding: 0.5rem;
+      cursor: pointer;
+      font-weight: bold;
+      list-style: none;
+    }
+    details summary::-webkit-details-marker { display: none; }
+    summary::after { content: ' ▼'; float: right; }
+    details[open] summary::after { content: ' ▲'; }
+    .filter-content {
+      padding: 0.5rem;
+      max-height: 150px;
+      overflow-y: auto;
+    }
+    .filter-content label {
+      display: block;
+      margin-bottom: 0.25rem;
+    }
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--spacing);
+      margin-bottom: var(--spacing);
+      align-items: center;
+    }
+    .controls label,
+    .controls button,
+    .controls select,
+    .controls input[type="color"],
+    .controls input[type="range"] {
+      font-family: inherit;
+      padding: 0.5rem;
+      border: var(--border-width) solid currentColor;
+      border-radius: var(--radius);
+      background: none;
+      color: inherit;
+      cursor: pointer;
+      transition: var(--transition);
+    }
+    .controls select {
+      background: rgba(255, 255, 255, 0.1);
+    }
+    body.light-mode .controls select {
+      background: rgba(0, 0, 0, 0.1);
+    }
+    .controls select:hover,
+    .controls select:focus {
+      background: rgba(255, 255, 255, 0.2);
+      outline: none;
+      box-shadow: 0 0 0 2px var(--fg-dark);
+    }
+    body.light-mode .controls select:hover,
+    body.light-mode .controls select:focus {
+      background: rgba(0, 0, 0, 0.2);
+      box-shadow: 0 0 0 2px var(--fg-light);
+    }
+    .btn {
+      background: none;
+    }
+    .btn:hover:enabled { background: currentColor; color: inherit; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    #question {
+      font-size: 1.2rem;
+      min-height: 4em;
+      margin: var(--spacing) 0;
+    }
+    .input-text {
+      flex: 1;
+      padding: 0.75rem;
+      border: var(--border-width) solid currentColor;
+      border-radius: var(--radius);
+      background: none;
+      color: inherit;
+      margin-bottom: 0.5rem;
+    }
+    #answerResult,
+    #correctAnswer {
+      font-weight: bold;
+      margin-top: 0.5rem;
+    }
+    details.history { border: none; }
+    #historyList {
+      list-style: none;
+      padding: 0.5rem;
+      margin: 0;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+    #historyList li {
+      padding: 0.5rem 0;
+      border-bottom: var(--border-width) solid currentColor;
+    }
+    #historyList li:last-child { border-bottom: none; }
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      border: 0;
+    }
+    .loading {
+      display: none;
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 20px;
+      height: 20px;
+      border: 3px solid #f3f3f3;
+      border-top: 3px solid #3498db;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+    .file-upload.loading .loading {
+      display: block;
+    }
+    @keyframes spin {
+      0% { transform: translate(-50%, -50%) rotate(0deg); }
+      100% { transform: translate(-50%, -50%) rotate(360deg); }
+    }
+    .file-upload .status {
+      display: none;
+      margin-left: 0.5rem;
+      font-size: 0.9rem;
+    }
+    .file-upload.success .status {
+      display: inline;
+      color: #2ecc71;
+    }
+    .file-upload.error .status {
+      display: inline;
+      color: #e74c3c;
+    }
+  </style>
+</head>
+<body class="dark-mode">
+  <div class="container">
+    <div id="scoreDisplay" aria-live="polite">Score: 0</div>
+    <div class="card file-upload">
+      <label for="questionFileInput">📄 Tossups</label>
+      <input type="file" id="questionFileInput" accept=".json,.ndjson" aria-describedby="questionFileHelp">
+      <div class="loading"></div>
+      <span class="status" id="fileStatus"></span>
+      <small id="questionFileHelp" class="sr-only">Upload a JSON or NDJSON file containing tossups with fields: question, answer, category, subcategory, difficulty.</small>
+    </div>
+    <div class="card file-upload">
+      <label for="backgroundFileInput">🖼️ Background</label>
+      <input type="file" id="backgroundFileInput" accept="image/png,image/jpeg">
+    </div>
+    <div class="filters">
+      <details open>
+        <summary>Categories</summary>
+        <div class="filter-content" id="catContent"></div>
+      </details>
+      <details open>
+        <summary>Subcategories</summary>
+        <div class="filter-content" id="subContent"></div>
+      </details>
+      <details open>
+        <summary>Difficulties</summary>
+        <div class="filter-content" id="diffContent"></div>
+      </details>
+    </div>
+    <div class="card controls">
+      <button id="nextBtn" class="btn">Next (n)</button>
+      <button id="buzzBtn" class="btn" disabled>Buzz (Space)</button>
+      <button id="darkToggle" class="btn">Toggle Theme</button>
+      <label for="voiceSelect">🎙️ Voice:</label>
+      <select id="voiceSelect" aria-label="Select voice for text-to-speech"></select>
+      <button id="refreshVoices" class="btn">🔄 Refresh</button>
+      <label><input type="radio" name="readMode" id="screenOnly" checked> On-Screen</label>
+      <label><input type="radio" name="readMode" id="ttsOnly"> TTS</label>
+      <label for="speedSlider">⏱️ Speed:</label>
+      <input type="range" id="speedSlider" min="0.5" max="2.0" step="0.1" value="1.0" aria-label="Adjust reading speed">
+      <span id="speedDisplay" aria-hidden="true">1.0×</span>
+    </div>
+    <div class="card question-area">
+      <div id="question" aria-live="polite"></div>
+      <div class="controls">
+        <input id="userAnswer" class="input-text" type="text" placeholder="Your answer" aria-label="Enter your answer">
+        <button id="checkBtn" class="btn">Check (Enter)</button>
+      </div>
+      <div id="answerResult" aria-live="assertive"></div>
+      <div id="correctAnswer" aria-live="assertive"></div>
+    </div>
+    <div class="card history-area">
+      <details class="history">
+        <summary class="btn">History</summary>
+        <ul id="historyList" aria-label="Question history"></ul>
+      </details>
+    </div>
+  </div>
+  <script>
+    window.onload = () => {
+      let tossups = [], current = null, score = 0;
+      let revealWords = [], revealIndex = 0, revealInterval;
+      let questionInterruptedEarly = false;
+      let voices = [];
+      const allSubcats = {};
+      let filteredPool = [];
+      let answerDetails = new Map();
+
+      const scoreEl = document.getElementById('scoreDisplay');
+      const catContent = document.getElementById('catContent');
+      const subContent = document.getElementById('subContent');
+      const diffContent = document.getElementById('diffContent');
+      const questionEl = document.getElementById('question');
+      const buzzBtn = document.getElementById('buzzBtn');
+      const checkBtn = document.getElementById('checkBtn');
+      const userAnswerEl = document.getElementById('userAnswer');
+      const answerResultEl = document.getElementById('answerResult');
+      const correctEl = document.getElementById('correctAnswer');
+      const historyList = document.getElementById('historyList');
+      const fileUpload = document.querySelector('.file-upload');
+      const fileStatus = document.getElementById('fileStatus');
+      const speedSlider = document.getElementById('speedSlider');
+
+      function normalizeEntry(o) {
+        const q = o.question_sanitized || o.question || '';
+        const a = o.answer_sanitized || o.answer || '';
+        if (!q || !a) return null;
+        const c = o.category || '';
+        const sc = o.subcategory || '';
+        let d = o.difficulty;
+        if (d && d.$numberInt) d = parseInt(d.$numberInt, 10);
+        return { question: q, answer: a, category: c, subcategory: sc, difficulty: d };
+      }
+
+      function buildFilters() {
+        catContent.innerHTML = '';
+        [...new Set(tossups.map(t => t.category))].filter(x => x).sort().forEach(c => {
+          const lbl = document.createElement('label');
+          const cb = document.createElement('input'); cb.type = 'checkbox'; cb.value = c; cb.addEventListener('change', () => { updateSubcats(); updateFilteredPool(); });
+          lbl.append(cb, ` ${c}`);
+          catContent.appendChild(lbl);
+        });
+        updateSubcats();
+
+        diffContent.innerHTML = '';
+        [...new Set(tossups.map(t => t.difficulty))].filter(x => x != null).sort((a, b) => a - b).forEach(d => {
+          const lbl = document.createElement('label');
+          const cb = document.createElement('input'); cb.type = 'checkbox'; cb.value = d; cb.addEventListener('change', updateFilteredPool);
+          lbl.append(cb, ` ${d}`);
+          diffContent.appendChild(lbl);
+        });
+        updateFilteredPool();
+      }
+
+      function updateSubcats() {
+        subContent.innerHTML = '';
+        const selectedCats = Array.from(catContent.querySelectorAll('input:checked')).map(cb => cb.value);
+        const subs = new Set();
+        selectedCats.forEach(c => { if (allSubcats[c]) allSubcats[c].forEach(sc => subs.add(sc)); });
+        Array.from(subs).sort().forEach(sc => {
+          const lbl = document.createElement('label');
+          const cb = document.createElement('input'); cb.type = 'checkbox'; cb.value = sc; cb.addEventListener('change', updateFilteredPool);
+          lbl.append(cb, ` ${sc}`);
+          subContent.appendChild(lbl);
+        });
+        updateFilteredPool();
+      }
+
+      function updateFilteredPool() {
+        const selC = Array.from(catContent.querySelectorAll('input:checked')).map(cb => cb.value);
+        const selS = Array.from(subContent.querySelectorAll('input:checked')).map(cb => cb.value);
+        const selD = Array.from(diffContent.querySelectorAll('input:checked')).map(cb => parseInt(cb.value, 10));
+        filteredPool = tossups.filter(t =>
+          (selC.length === 0 || selC.includes(t.category)) &&
+          (selS.length === 0 || selS.includes(t.subcategory)) &&
+          (selD.length === 0 || selD.includes(t.difficulty))
+        );
+      }
+
+      function updateScore() { scoreEl.innerText = `Score: ${score}`; }
+
+      function populateVoiceList() {
+        voices = speechSynthesis.getVoices().sort((a, b) => a.name.localeCompare(b.name));
+        const vs = document.getElementById('voiceSelect'); vs.innerHTML = '';
+        if (voices.length === 0) {
+          vs.appendChild(new Option('Loading voices...', ''));
+          setTimeout(populateVoiceList, 100);
+          return;
+        }
+        voices.forEach((v, i) => vs.appendChild(new Option(`${v.name} (${v.lang})`, i)));
+        const us = voices.findIndex(v => v.lang.startsWith('en-US'));
+        const uk = voices.findIndex(v => v.lang.startsWith('en-GB'));
+        if (us >= 0) vs.value = us; else if (uk >= 0) vs.value = uk;
+      }
+      speechSynthesis.onvoiceschanged = populateVoiceList;
+      populateVoiceList();
+      document.getElementById('refreshVoices').addEventListener('click', () => { populateVoiceList(); alert('Voices refreshed'); });
+
+      function speakText(text, speed) {
+        stopReading();
+        const utterance = new SpeechSynthesisUtterance(text.replace(/<[^>]*>?/gm, ''));
+        utterance.voice = voices[parseInt(document.getElementById('voiceSelect').value)] || voices[0];
+        utterance.rate = speed;
+        speechSynthesis.speak(utterance);
+      }
+
+      function levenshtein(a, b) {
+        const matrix = Array(b.length + 1).fill().map(() => Array(a.length + 1).fill(0));
+        for (let i = 0; i <= a.length; i++) matrix[0][i] = i;
+        for (let j = 0; j <= b.length; j++) matrix[j][0] = j;
+        for (let j = 1; j <= b.length; j++) {
+          for (let i = 1; i <= a.length; i++) {
+            const indicator = a[i - 1] === b[j - 1] ? 0 : 1;
+            matrix[j][i] = Math.min(
+              matrix[j][i - 1] + 1,
+              matrix[j - 1][i] + 1,
+              matrix[j - 1][i - 1] + indicator
+            );
+          }
+        }
+        return matrix[b.length][a.length];
+      }
+
+      document.getElementById('questionFileInput').addEventListener('change', async e => {
+        const file = e.target.files[0];
+        if (!file) return;
+        fileUpload.classList.add('loading');
+        fileStatus.innerText = '';
+        fileUpload.classList.remove('success', 'error');
+        try {
+          const raw = await file.text();
+          try {
+            const arr = JSON.parse(raw);
+            if (Array.isArray(arr)) tossups = arr.map(normalizeEntry).filter(x => x);
+          } catch {
+            tossups = raw.split(/\r?\n/).map(l => { try { return normalizeEntry(JSON.parse(l)); } catch { return null; } }).filter(x => x);
+          }
+          if (!tossups.length) throw new Error('No valid tossups found in file.');
+          tossups.forEach(t => { if (!allSubcats[t.category]) allSubcats[t.category] = new Set(); if (t.subcategory) allSubcats[t.category].add(t.subcategory); });
+          answerDetails.clear();
+          tossups.forEach(t => {
+            const answer = t.answer.toLowerCase();
+            if (!answerDetails.has(answer)) answerDetails.set(answer, []);
+            answerDetails.get(answer).push(t.question);
+          });
+          buildFilters();
+          fileUpload.classList.remove('loading');
+          fileUpload.classList.add('success');
+          fileStatus.innerText = '✓ Success';
+        } catch (err) {
+          fileUpload.classList.remove('loading');
+          fileUpload.classList.add('error');
+          fileStatus.innerText = `✗ Error: ${err.message}`;
+          alert(`Error loading tossups: ${err.message}`);
+        }
+      });
+
+      document.getElementById('backgroundFileInput').addEventListener('change', e => {
+        const f = e.target.files[0];
+        if (f && f.type.startsWith('image/')) {
+          document.body.style.backgroundImage = `url(${URL.createObjectURL(f)})`;
+        }
+      });
+
+      document.getElementById('nextBtn').addEventListener('click', nextQuestion);
+      buzzBtn.addEventListener('click', buzz);
+      checkBtn.addEventListener('click', checkAnswer);
+      document.addEventListener('keydown', e => {
+        if (document.activeElement === userAnswerEl) {
+          if (e.key === 'Enter') { e.preventDefault(); checkAnswer(); }
+        } else {
+          if (e.code === 'Space' && !buzzBtn.disabled) { e.preventDefault(); buzz(); }
+          if (e.key.toLowerCase() === 'n') { e.preventDefault(); nextQuestion(); }
+        }
+      });
+      document.getElementById('darkToggle').addEventListener('click', () => document.body.classList.toggle('light-mode'));
+      speedSlider.addEventListener('input', function () { document.getElementById('speedDisplay').innerText = this.value + '×'; });
+
+      function nextQuestion() {
+        stopReading();
+        hideAnswer();
+        answerResultEl.innerText = '';
+        correctEl.innerText = '';
+        if (filteredPool.length === 0) {
+          updateFilteredPool();
+          if (filteredPool.length === 0) return alert('No matching tossups found.');
+        }
+        current = filteredPool[Math.floor(Math.random() * filteredPool.length)];
+        displayQuestion(current.question);
+        questionInterruptedEarly = false;
+        updateScore();
+      }
+
+      function displayQuestion(txt) {
+        questionEl.innerHTML = '';
+        clearInterval(revealInterval);
+        if (document.getElementById('screenOnly').checked) {
+          const sp = parseFloat(speedSlider.value || '1.0');
+          const baseWpm = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--base-wpm'));
+          const effectiveWpm = baseWpm * sp;
+          const words = txt.replace(/<[^>]*>?/gm, '').split(/\s+/).filter(w => w.length).length;
+          const msPerWord = 60000 / effectiveWpm;
+          revealWords = txt.replace(/<[^>]*>?/gm, '').split(/\s+/).filter(w => w.length);
+          revealIndex = 0;
+          revealInterval = setInterval(() => {
+            if (revealIndex >= revealWords.length) {
+              clearInterval(revealInterval);
+              return;
+            }
+            questionEl.innerHTML += (revealIndex ? ' ' : '') + `<span class="highlight">${revealWords[revealIndex]}</span>`;
+            revealIndex++;
+          }, msPerWord);
+        }
+        if (document.getElementById('ttsOnly').checked) speakText(txt, parseFloat(speedSlider.value || '1.0'));
+        buzzBtn.disabled = false;
+      }
+
+      function buzz() {
+        questionInterruptedEarly = (revealIndex < revealWords.length);
+        stopReading();
+        showAnswer();
+        buzzBtn.disabled = true;
+      }
+
+      function parseAnswers(answer) {
+        const cleanAnswer = answer.replace(/<[^>]*>?/gm, '').toLowerCase();
+        const answers = [];
+        let currentAnswer = '';
+        let depth = { paren: 0, brace: 0, bracket: 0 };
+        let i = 0;
+
+        while (i < cleanAnswer.length) {
+          const char = cleanAnswer[i];
+          if (char === '(') depth.paren++;
+          else if (char === ')') depth.paren--;
+          else if (char === '{') depth.brace++;
+          else if (char === '}') depth.brace--;
+          else if (char === '[') depth.bracket++;
+          else if (char === ']') depth.bracket--;
+
+          if (depth.paren === 0 && depth.brace === 0 && depth.bracket === 0) {
+            if (char === ',' || char === ';') {
+              if (currentAnswer.trim()) answers.push(currentAnswer.trim());
+              currentAnswer = '';
+            } else {
+              currentAnswer += char;
+            }
+            const remaining = cleanAnswer.slice(i);
+            const phraseMatch = remaining.match(/^\s*(or|and|accept|prompt)\s+/i);
+            if (phraseMatch && depth.paren === 0 && depth.brace === 0 && depth.bracket === 0) {
+              if (currentAnswer.trim()) answers.push(currentAnswer.trim());
+              currentAnswer = '';
+              i += phraseMatch[0].length - 1;
+            }
+          } else {
+            currentAnswer += char;
+          }
+          i++;
+        }
+
+        if (currentAnswer.trim()) {
+          const lastAnswer = currentAnswer.trim();
+          if (lastAnswer.includes('(')) {
+            const mainAnswer = lastAnswer.split('(')[0].trim();
+            if (mainAnswer) answers.push(mainAnswer);
+            const acceptMatch = lastAnswer.match(/\((?:accept\s+)?(.+?)\)/i);
+            if (acceptMatch) {
+              const acceptVariants = acceptMatch[1].split(/,\s*or\s*|,|\s+and\s+/).map(v => v.trim());
+              answers.push(...acceptVariants.filter(v => v));
+            }
+          } else {
+            answers.push(lastAnswer);
+          }
+        }
+
+        const finalAnswers = [];
+        answers.forEach((ans, index) => {
+          if (ans.match(/accept.*before mentioned/i)) {
+            finalAnswers.push(...answers.slice(0, index).map(a => a.trim()));
+          } else {
+            finalAnswers.push(ans.trim());
+          }
+        });
+
+        return finalAnswers.filter(ans => ans && !ans.match(/accept.*before mentioned/i));
+      }
+
+      function isAnswerCorrect(userAnswer, correctAnswers) {
+        userAnswer = userAnswer.trim().toLowerCase();
+        if (!userAnswer) return false;
+
+        for (let correct of correctAnswers) {
+          const threshold = Math.max(2, Math.ceil(correct.length * 0.2));
+          const distance = levenshtein(userAnswer, correct);
+          // Check for substring match or exact/Levenshtein match
+          if (correct.toLowerCase().includes(userAnswer) || distance <= threshold || userAnswer === correct) {
+            return true;
+          }
+        }
+        return false;
+      }
+
+      function checkAnswer() {
+        if (!current) return;
+        const ua = userAnswerEl;
+        let u = ua.value.trim();
+        if (!u) {
+          answerResultEl.innerText = '❌ Please enter an answer';
+          return;
+        }
+
+        const correctAnswers = parseAnswers(current.answer);
+        const isCorrect = isAnswerCorrect(u, correctAnswers);
+        let pts = isCorrect ? 10 : (questionInterruptedEarly ? -5 : 0);
+        score += pts;
+        updateScore();
+        answerResultEl.innerText = isCorrect ? `✅ +${pts}` : pts < 0 ? '❌ -5' : '❌';
+
+        let baseAnswer = '';
+        let inBrackets = false, inParentheses = false, inBraces = false;
+        for (let i = 0; i < current.answer.length; i++) {
+          const char = current.answer[i];
+          if (char === '[') inBrackets = true;
+          else if (char === ']') inBrackets = false;
+          else if (char === '(') inParentheses = true;
+          else if (char === ')') inParentheses = false;
+          else if (char === '{') inBraces = true;
+          else if (char === '}') inBraces = false;
+
+          if (!inBrackets && !inParentheses && !inBraces) {
+            if (char.match(/[,\s;]/) || current.answer.slice(i).match(/^\s*(or|and|accept|prompt)\s+/i)) {
+              break;
+            }
+            baseAnswer += char;
+          }
+        }
+        baseAnswer = baseAnswer.trim();
+
+        if (isCorrect) {
+          correctEl.innerHTML = `<b>Answer:</b> ${current.answer}<br><b>Resources:</b> <a href="https://wikipedia.com/wiki/${encodeURIComponent(baseAnswer.replace(/ /g, '_'))}" target="_blank">Learn More 1</a>, <a href="https://www.britannica.com/biography/${encodeURIComponent(baseAnswer.replace(/ /g, '_'))}" target="_blank">Learn More 2</a>`;
+        } else {
+          const correctAnswer = parseAnswers(current.answer)[0].toLowerCase();
+          let explanation = '';
+          if (answerDetails.has(correctAnswer)) {
+            const questions = answerDetails.get(correctAnswer);
+            if (questions.length > 0) {
+              const allSentences = new Set();
+              questions.forEach(q => q.split('. ').filter(s => s.trim()).forEach(s => {
+                if (!s.match(/for\s+[0-9]+\s+points/i)) allSentences.add(s.trim());
+              }));
+              const uniqueSentences = Array.from(allSentences);
+              const selectedSentences = uniqueSentences.sort(() => 0.5 - Math.random()).slice(0, 2);
+              explanation = selectedSentences.join('. ');
+            }
+          }
+          if (!explanation) {
+            explanation = "No specific details available for this answer based on the uploaded tossups.";
+          }
+          correctEl.innerHTML = `<b>Answer:</b> ${current.answer}<br><b>Explanation:</b> ${explanation}<br><b>Resources:</b> <a href="https://wikipedia.com/wiki/${encodeURIComponent(baseAnswer.replace(/ /g, '_'))}" target="_blank">Learn More 1</a>, <a href="https://www.britannica.com/biography/${encodeURIComponent(baseAnswer.replace(/ /g, '_'))}" target="_blank">Learn More 2</a>`;
+        }
+
+        ua.disabled = true;
+        checkBtn.disabled = true;
+        checkBtn.style.display = 'none';
+        buzzBtn.disabled = true;
+        showAnswer();
+        const li = document.createElement('li');
+        li.innerHTML = `Q: ${current.question}<br>A: ${current.answer}<br>Your answer: ${ua.value || '(none)'}`;
+        historyList.prepend(li);
+        ua.value = '';
+        ua.blur();
+      }
+
+      function showAnswer() {
+        userAnswerEl.style.display = 'block';
+        userAnswerEl.disabled = false;
+        userAnswerEl.focus();
+        checkBtn.style.display = 'inline-block';
+        checkBtn.disabled = false;
+      }
+
+      function hideAnswer() {
+        userAnswerEl.style.display = 'none';
+        userAnswerEl.value = '';
+        checkBtn.style.display = 'none';
+        checkBtn.disabled = true;
+      }
+
+      function stopReading() {
+        clearInterval(revealInterval);
+        speechSynthesis.cancel();
+      }
+    };
+  </script>
+</body>
+</html>
